@@ -9,6 +9,10 @@ from sklearn.metrics import classification_report, confusion_matrix
 
 ds = np.load("data/training/myo_ds_30l_10ol.npz")
 X, y = ds["X"], ds["y"]
+
+print("First window shape:", X[0].shape)  # (30, 8)
+print("First reading in first window:", X[0][0])  # array of 8 EMG values
+print("First window (all 30 readings):\n", X[0])
 # Xf = X.reshape(X.shape[0], -1)
 
 #Undersampling for neutral

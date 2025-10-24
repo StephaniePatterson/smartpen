@@ -6,7 +6,7 @@ from collections import deque
 with open("svm.pkl", "rb") as f:
     clf = pickle.load(f)
 
-WINDOW_SIZE = 50
+WINDOW_SIZE = 30
 NUM_CHANNELS = 8
 STRIDE = 1
 current = deque(maxlen=WINDOW_SIZE)
@@ -24,8 +24,11 @@ def on_emg_sample(emg_sample):
     """
     emg_sample: iterable of length 8 (EMG_1..EMG_8)
     """
+    #print(emg_sample)
+
+    processed = [abs(float(v)) * 10 for v in emg_sample]
     # append frame (ensure floats)
-    current.append([float(v) for v in emg_sample])
+    current.append(processed)
 
     # when the buffer is full, make prediction(s)
     if len(current) == WINDOW_SIZE:
@@ -46,4 +49,5 @@ def on_emg_sample(emg_sample):
 
 def handle_prediction(gesture_name, label):
     # No-op placeholder: route this to UI, LSL marker stream, print, etc.
-    print(f"Predicted: {gesture_name} (label {label})")
+    if gesture_name != "neutral":
+        print(f"Predicted: {gesture_name} (label {label})")
