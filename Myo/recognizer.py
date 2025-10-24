@@ -1,53 +1,71 @@
-import pickle
+﻿import pickle
 import numpy as np
 from collections import deque
-#import requests
+import time
 
+# --- Load trained SVM pipeline (must exist as svm.pkl) ---
 with open("svm.pkl", "rb") as f:
     clf = pickle.load(f)
 
+# --- Sliding window config (matches training) ---
 WINDOW_SIZE = 30
 NUM_CHANNELS = 8
-STRIDE = 1
-current = deque(maxlen=WINDOW_SIZE)
 
-ds = np.load("data/training/myo_ds_30l_10ol.npz")
-print(np.unique(ds['y'], return_counts=True))
+# Smoothing/debounce
+PRED_SMOOTH = 3
+ACTION_COOLDOWN_S = 0.40
 
+_current = deque(maxlen=WINDOW_SIZE)
+_pred_hist = deque(maxlen=PRED_SMOOTH)
+_last_action_ts = 0.0
+
+# Label map (adjust to your dataset)
 label_map = {
     0: "neutral",
     1: "flexion",
     2: "extension",
     7: "fist"
 }
+
+# Will be set by capture_shapes.register_app(app)
+_app_ref = None
+
+def register_app(app):
+    global _app_ref
+    _app_ref = app
+
+def _majority_vote(labels):
+    if not labels:
+        return None
+    vals, counts = np.unique(labels, return_counts=True)
+    return int(vals[np.argmax(counts)])
+
 def on_emg_sample(emg_sample):
-    """
-    emg_sample: iterable of length 8 (EMG_1..EMG_8)
-    """
-    #print(emg_sample)
-
+    # Simple abs scaling to mimic your earlier preprocessing
     processed = [abs(float(v)) * 10 for v in emg_sample]
-    # append frame (ensure floats)
-    current.append(processed)
+    _current.append(processed)
+    if len(_current) < WINDOW_SIZE:
+        return
+    window = np.array(_current, dtype=np.float32).reshape(1, -1)
+    label = int(clf.predict(window)[0])
+    _pred_hist.append(label)
+    smooth_label = _majority_vote(list(_pred_hist))
+    gesture = label_map.get(smooth_label, f"label_{smooth_label}")
+    if gesture in ("flexion", "extension"):
+        _handle_prediction(gesture)
 
-    # when the buffer is full, make prediction(s)
-    if len(current) == WINDOW_SIZE:
-        # convert to numpy array shape (WINDOW_SIZE, NUM_CHANNELS)
-        window = np.array(current, dtype=np.float32)
-        #print(window)
-        # flatten (1, 240)
-        X = window.reshape(1, -1)
-        # predict
-        pred = clf.predict(X)   
-        label = int(pred[0])
-        gesture = label_map.get(label, f"label_{label}")
-
-        # score = clf.decision_function(X) 
-        if gesture != "neutral":
-            print("something else detected!!!\n\n")
-        handle_prediction(gesture, label)
-
-def handle_prediction(gesture_name, label):
-    # No-op placeholder: route this to UI, LSL marker stream, print, etc.
-    if gesture_name != "neutral":
-        print(f"Predicted: {gesture_name} (label {label})")
+def _handle_prediction(gesture_name):
+    global _last_action_ts
+    now = time.monotonic()
+    if (now - _last_action_ts) < ACTION_COOLDOWN_S:
+        return
+    _last_action_ts = now
+    if _app_ref is None:
+        return
+    try:
+        if gesture_name == "flexion":
+            _app_ref.root.after(0, _app_ref.decrease_brush)
+        elif gesture_name == "extension":
+            _app_ref.root.after(0, _app_ref.increase_brush)
+    except Exception:
+        pass
